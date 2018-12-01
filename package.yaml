@@ -1,0 +1,67 @@
+name:                advent2018
+version:             0.1.0.0
+github:              "JulianBirch/advent2018"
+license:             BSD3
+author:              "Julian Birch"
+maintainer:          "julian.birch+ical@gmail.com"
+copyright:           "Julian Birch 2018"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Data Format
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/JulianBirch/advent2018#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- split
+- containers
+- megaparsec
+- composition-extra
+- either
+- mtl
+- lens
+- recursion-schemes
+- comonad
+- split
+- containers
+- megaparsec
+- composition-extra
+- either
+- mtl
+- lens
+- recursion-schemes
+- comonad
+- algebra
+
+library:
+  source-dirs: src
+
+executables:
+  advent2018-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - advent2018
+
+tests:
+  advent2018-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - advent2018

@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module Parsing(Parser, ParseResult, lineParser, parseAdventFile) where
+module Parsing(Parser, ParseResult, lineParser, parseAdventFile, adventFile) where
 
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char as C

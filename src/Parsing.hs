@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE CPP #-} -- Yeah, really
 
 module Parsing(Parser, ParseResult, lineParser, 
     parseAdventFile, parseAdventFile'',
@@ -22,7 +23,11 @@ adventFile :: Int -> String
 adventFile i = adventFile' (show i)
 
 adventFile' :: String -> String
+#ifdef mingw32_HOST_OS
 adventFile' s = "C:\\Users\\me\\advent2018\\day" ++ s ++ ".txt"
+#else
+adventFile' s = "/mnt/c/Users/me/advent2018/day" ++ s ++ ".txt"
+#endif
 
 parseAdventFile'' :: MP.Parsec e String a -> String -> IO (Either (MP.ParseErrorBundle String e) a)
 parseAdventFile'' p f = MP.runParser p f <$> readFile f where

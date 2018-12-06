@@ -11,10 +11,8 @@ module Day4 where
 
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char.Lexer as L
-import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Parsing as P
-import qualified Utility as U
 
 import Utility ((<$$>))
 import Data.Foldable(foldlM, foldl')
@@ -23,11 +21,10 @@ import Data.List(sortBy, maximumBy)
 import Data.Function(on)
 import Data.Maybe(fromMaybe)
 import Control.Lens.Operators
-import Control.Monad.State.Strict(State, get, evalState)
+import Control.Monad.State.Strict(MonadState, State, get, evalState)
 import Control.Monad.Reader(MonadReader)
-import Debug.Trace(traceShowId)
 
-import Control.Lens -- (makeLenses)
+import Control.Lens(Lens', lens, makeLenses, view, over)
 
 data Date = Date {
     year :: Int,
@@ -81,10 +78,9 @@ atD k d = lens get set where
 
 atD2 :: (Ord k1, Ord k2) => k1 -> k2 -> v -> Lens' (M.Map k1 (M.Map k2 v)) v
 atD2 k1 k2 v = (atD k1 M.empty) . (atD k2 v)
-    
+
 type GuardMinuteCount = M.Map GuardId (M.Map Int Int)
-    -- Guard, Minute, Count
-    -- Asleep Data     
+
 data GuardState = GuardState {
     _asleepSince :: Maybe Int,
     _currentGuard :: GuardId
@@ -106,7 +102,7 @@ update gmc to = do
     let range = [since..(to-1)]
     pure $ foldl' (flip increment) gmc range
 
-processEvent :: (Date,Event) -> GuardMinuteCount -> State GuardState GuardMinuteCount
+processEvent :: (MonadState GuardState m) => (Date,Event) -> GuardMinuteCount -> m GuardMinuteCount
 processEvent (_, (BeginShift id)) gmc = do
     currentGuard .= id
     asleepSince .= Nothing
@@ -115,16 +111,16 @@ processEvent (d, FallAsleep) gmc = do
     asleepSince .= Just (minute d)
     pure gmc
 processEvent (d, WakeUp) gmc = do
-    xxx <- get
-    let from = update gmc (minute d) xxx
+    gs <- get
+    let result = update gmc (minute d) gs
     asleepSince .= Nothing
-    pure from
+    pure result
 
 process :: (Foldable t) => t (Date, Event) -> State GuardState GuardMinuteCount
 process = foldlM (flip processEvent) M.empty
 
-process2 :: (Foldable t) => t (Date, Event) -> GuardMinuteCount
-process2 = flip (evalState . process) initialGuardState
+evalProcess :: (Foldable t) => t (Date, Event) -> GuardMinuteCount
+evalProcess = flip (evalState . process) initialGuardState
 
 pickBest :: (Ord v2) => (v -> v2) -> M.Map k v -> (k, v)
 pickBest f x = maximumBy (on compare (f . snd)) (M.toList x)
@@ -132,8 +128,15 @@ pickBest f x = maximumBy (on compare (f . snd)) (M.toList x)
 bestGuardAndMinute :: GuardMinuteCount -> (GuardId, Int)
 bestGuardAndMinute gmc = (fst . pickBest id) <$> (pickBest sum gmc)
 
-bestMinuteAndGuard = pickBest snd . (fmap (pickBest id))
+bestMinuteAndGuard :: GuardMinuteCount -> (GuardId, Int)
+bestMinuteAndGuard = fmap fst . pickBest snd . (fmap (pickBest id))
 
-day4a = (bestGuardAndMinute . process2) <$$> day4Input
+getAnswer :: (GuardMinuteCount -> (GuardId, Int)) -> P.ParseResult IO Int
+getAnswer f = (compute . f . evalProcess) <$$> day4Input where
+    compute (GuardId g, x) = g * x
 
-day4b = (bestMinuteAndGuard . process2) <$$> day4Input
+day4a :: P.ParseResult IO Int
+day4a = getAnswer bestGuardAndMinute
+
+day4b :: P.ParseResult IO Int
+day4b = getAnswer bestMinuteAndGuard

@@ -116,7 +116,7 @@ processEvent (d, FallAsleep) gmc = do
     pure gmc
 processEvent (d, WakeUp) gmc = do
     xxx <- get
-    let from =  update gmc (minute d) (traceShowId xxx)
+    let from = update gmc (minute d) xxx
     asleepSince .= Nothing
     pure from
 
@@ -126,10 +126,14 @@ process = foldlM (flip processEvent) M.empty
 process2 :: (Foldable t) => t (Date, Event) -> GuardMinuteCount
 process2 = flip (evalState . process) initialGuardState
 
-bestGuardAndMinute :: GuardMinuteCount -> (GuardId, Int)
-bestGuardAndMinute gmc = (fst . pickBest id) <$> (pickBest sum gmc) where
-    pickBest :: (Ord v2) => (v -> v2) -> M.Map k v -> (k, v)
-    pickBest f x = maximumBy (on compare (f . snd)) (M.toList x)
+pickBest :: (Ord v2) => (v -> v2) -> M.Map k v -> (k, v)
+pickBest f x = maximumBy (on compare (f . snd)) (M.toList x)
 
+bestGuardAndMinute :: GuardMinuteCount -> (GuardId, Int)
+bestGuardAndMinute gmc = (fst . pickBest id) <$> (pickBest sum gmc)
+
+bestMinuteAndGuard = pickBest snd . (fmap (pickBest id))
 
 day4a = (bestGuardAndMinute . process2) <$$> day4Input
+
+day4b = (bestMinuteAndGuard . process2) <$$> day4Input

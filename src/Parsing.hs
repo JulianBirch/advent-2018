@@ -3,7 +3,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
 
-module Parsing(Parser, ParseResult, lineParser, parseAdventFile, adventFile) where
+module Parsing(Parser, ParseResult, lineParser, 
+    parseAdventFile, parseAdventFile'',
+    adventFile, adventFile') where
 
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char as C
@@ -14,11 +16,16 @@ type Parser = MP.ParsecT Void String Identity -- No custom errors, String parser
 type ParseResult m a = m (Either (MP.ParseErrorBundle String Void) a)
 
 lineParser :: (MP.MonadParsec e s m, MP.Token s ~ Char) => m a -> m [a]
-lineParser p = MP.many (p <* C.char '\n')
+lineParser p = MP.sepEndBy p $ C.char '\n'
 
 adventFile :: Int -> String
-adventFile i = "C:\\Users\\me\\advent2018\\day" ++ (show i) ++ ".txt"
+adventFile i = adventFile' (show i)
 
-parseAdventFile :: (MP.Parsec e String a) -> Int -> IO (Either (MP.ParseErrorBundle String e) a)
-parseAdventFile p i = MP.runParser p file <$> readFile file where
-    file = adventFile i
+adventFile' :: String -> String
+adventFile' s = "C:\\Users\\me\\advent2018\\day" ++ s ++ ".txt"
+
+parseAdventFile'' :: MP.Parsec e String a -> String -> IO (Either (MP.ParseErrorBundle String e) a)
+parseAdventFile'' p f = MP.runParser p f <$> readFile f where
+
+parseAdventFile :: MP.Parsec e String a -> Int -> IO (Either (MP.ParseErrorBundle String e) a)
+parseAdventFile p f = parseAdventFile'' p (adventFile f)

@@ -1,5 +1,9 @@
 {-# LANGUAGE FlexibleContexts, RankNTypes, ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Day7 where
 
@@ -8,7 +12,7 @@ import qualified Control.Foldl as F
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List(foldl')
-import Data.Maybe(fromMaybe)
+import Data.Maybe(fromMaybe, maybe)
 import Debug.Trace(traceShow)
 import qualified Utility as U
 import qualified Parsing as P
@@ -19,6 +23,7 @@ import Control.Monad.State.Strict(MonadState, StateT, get, evalStateT)
 import Control.Monad.Reader(MonadReader)
 import Control.Monad.Trans.Class(lift)
 import Control.Monad.Combinators(many)
+import Data.Proxy(Proxy(..))
 
 import Control.Lens(Lens', lens, makeLenses, view, over, use)
 import qualified Control.Lens as Le 
@@ -32,38 +37,56 @@ inDegree = F.Fold r M.empty id where
 zeroNodes :: (Ord a) => (M.Map a Int) -> [a]
 zeroNodes = map fst . filter ((== 0) . snd) . M.toList
 
-backTrace :: (Ord a, Ord b) => F.Fold (a, b) (M.Map a (S.Set b))
-backTrace = F.Fold r M.empty id where
+backTrace :: (Ord a, Ord b) => F.Fold (a, b) (M.Map a [b])
+backTrace = F.Fold r M.empty (fmap S.toList) where
     r m (x, y) = M.insertWith S.union x (S.singleton y) m
 
-initalState :: (Ord a) => F.Fold (a, a) (M.Map a Int, M.Map a (S.Set a))
+initalState :: (Ord a) => F.Fold (a, a) (M.Map a Int, M.Map a [a])
 initalState = (,) <$> inDegree <*> backTrace 
 
-data HahnState a = HahnState {
-    _inDeg :: M.Map a Int,
-    _zeroN :: S.Set a
-} deriving (Show)
+class ZeroNodes zn where
+    type Elem zn
+    construct :: [Elem zn] -> zn
+    push :: Elem zn -> zn -> zn
+    pop :: zn -> (zn, Maybe (Elem zn))
+
+data LexicalPriority a = LexicalPriority (S.Set a) 
+    deriving (Show)
+
+instance (Ord a) => ZeroNodes (LexicalPriority a) where
+    type Elem (LexicalPriority a) = a
+    construct = LexicalPriority . foldr S.insert S.empty
+    push x (LexicalPriority s) = LexicalPriority $ S.insert x s
+    pop (LexicalPriority s) = (ns, x)
+        where x = S.lookupMin s
+              ns = LexicalPriority $ fromMaybe S.empty $ S.delete <$> x <*> pure s
+
+data HahnState zn = HahnState {
+    _inDeg :: M.Map (Elem zn) Int,
+    _zeroN :: zn
+}
+
+deriving instance (Show zn, Show (Elem zn)) => Show (HahnState zn)
 
 makeLenses ''HahnState
 
-nextNode :: forall a . (Show a, Ord a) => (M.Map a (S.Set a)) -> StateT (HahnState a) Maybe a
+nextNode :: forall zn . (Show zn, Show (Elem zn), Ord (Elem zn), ZeroNodes zn) => (M.Map (Elem zn) [(Elem zn)]) -> StateT (HahnState zn) Maybe (Elem zn)
 nextNode bt = do
     xxx <- get
-    x <- traceShow xxx $ (lift . S.lookupMin) =<< (use zeroN)
-    zeroN %= (S.delete x)
-    -- This next bit of nastiness courtesy of the fact Set isn't an instance of Functor
-    let nodes = maybe [] S.toList $ M.lookup x bt
+    (ns, maybeX) <- traceShow xxx $ pop <$> (use zeroN)
+    zeroN .= ns
+    (x :: Elem zn) <- lift maybeX
+    let nodes = fromMaybe [] $ M.lookup x bt
     x <$ traverse countDown nodes 
-    where countDown :: a -> StateT (HahnState a) Maybe ()
+    where countDown :: (Elem zn) -> StateT (HahnState zn) Maybe ()
           countDown n = (inDeg . U.atD n 0) <%= (subtract 1) >>= (updateZeroNodes n)
-          updateZeroNodes n 0 = zeroN %= (S.insert n)
+          updateZeroNodes n 0 = zeroN %= (push n)
           updateZeroNodes _ _ = pure ()
 
-hahnAlgorithm :: (Show a, Foldable t, Ord a) => t (a, a) -> [a]
-hahnAlgorithm edges = fromMaybe [] xxx where
+hahnAlgorithm :: forall zn t . (Show zn, Show (Elem zn), ZeroNodes zn, Foldable t, Show (Elem zn), Ord (Elem zn)) => Proxy zn -> t (Elem zn, Elem zn) -> [Elem zn]
+hahnAlgorithm _ edges = fromMaybe [] xxx where
     (inD, bt) = F.fold ((,) <$> inDegree <*> backTrace) edges
-    initialZeroNodes = foldMap S.singleton (zeroNodes inD)
-    start = HahnState inD initialZeroNodes 
+    start = HahnState inD (construct $ zeroNodes inD :: zn) 
     xxx = traceShow bt $ evalStateT (many $ nextNode bt) start
 
 edgeParser :: P.Parser (Char, Char)
@@ -79,5 +102,6 @@ day7Input = P.parseAdventFile (P.lineParser edgeParser) 7
 day7Test :: P.ParseResult IO [(Char, Char)]
 day7Test = P.parseAdventFile' (P.lineParser edgeParser) (P.adventFile' "7test")
 
-day7a = hahnAlgorithm <$$> day7Input
-day7atest = hahnAlgorithm <$$> day7Test
+day7a = hahnAlgorithm (Proxy :: Proxy (LexicalPriority Char)) <$$> day7Input
+day7atest = hahnAlgorithm (Proxy :: Proxy (LexicalPriority Char)) <$$> day7Test
+{--}

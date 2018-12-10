@@ -26,6 +26,7 @@ dependencies:
 - megaparsec
 - composition-extra
 - either
+- transformers
 - mtl
 - lens
 - recursion-schemes
@@ -40,6 +41,10 @@ dependencies:
 - recursion-schemes
 - comonad
 - algebra
+- foldl
+- parser-combinators
+- safe
+- deriving-compat
 
 library:
   source-dirs: src

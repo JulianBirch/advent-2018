@@ -14,7 +14,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import qualified Data.Map.Strict as M
 import qualified Parsing as P
 
-import Utility ((<$$>))
+import Utility ((<$$>), atD, atD2)
 import Data.Foldable(foldlM, foldl')
 import Control.Applicative((<|>))
 import Data.List(sortBy, maximumBy)
@@ -24,7 +24,8 @@ import Control.Lens.Operators
 import Control.Monad.State.Strict(MonadState, State, get, evalState)
 import Control.Monad.Reader(MonadReader)
 
-import Control.Lens(Lens', lens, makeLenses, view, over)
+import Control.Lens(Lens', lens, makeLenses, view, over, use)
+import qualified Control.Lens as Le 
 
 data Date = Date {
     year :: Int,
@@ -70,14 +71,6 @@ day4Input = parse (P.adventFile 4)
 
 day4TestInput :: P.ParseResult IO [(Date, Event)]
 day4TestInput = parse (P.adventFile' "4test")
-
-atD :: (Ord k) => k -> v -> Lens' (M.Map k v) v
-atD k d = lens get set where
-    get m = M.findWithDefault d k m 
-    set m v = M.insert k v m
-
-atD2 :: (Ord k1, Ord k2) => k1 -> k2 -> v -> Lens' (M.Map k1 (M.Map k2 v)) v
-atD2 k1 k2 v = (atD k1 M.empty) . (atD k2 v)
 
 type GuardMinuteCount = M.Map GuardId (M.Map Int Int)
 

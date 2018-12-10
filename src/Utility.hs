@@ -1,9 +1,11 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts, RankNTypes, ScopedTypeVariables #-}
 
-module Utility((<$$>), leftToMaybe, groupByKey) where
+
+module Utility((<$$>), leftToMaybe, groupByKey, atD, atD2) where
 
 import qualified Data.Map.Strict as M
 import Data.Foldable(foldl')
+import Control.Lens(Lens', lens)
 
 leftToMaybe :: (Either a b) -> Maybe a
 leftToMaybe (Left a) = Just a
@@ -18,3 +20,13 @@ groupByKey f l = foldl' (flip r) M.empty l where
     g a = M.singleton (f a) [a]
     r :: a -> M.Map b [a] -> M.Map b [a]
     r a m = M.unionWith (++) m (g a)
+
+atD :: (Ord k) => k -> v -> Lens' (M.Map k v) v
+atD k d = lens get set where
+    get m = M.findWithDefault d k m 
+    set m v = M.insert k v m
+
+atD2 :: (Ord k1, Ord k2) => k1 -> k2 -> v -> Lens' (M.Map k1 (M.Map k2 v)) v
+atD2 k1 k2 v = (atD k1 M.empty) . (atD k2 v)
+
+    

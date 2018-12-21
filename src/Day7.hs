@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-missing-signatures -Wno-unused-matches #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -24,7 +23,7 @@ import Control.Applicative(empty, (<|>), many, Alternative)
 import Data.Proxy(Proxy(..))
 import Data.List(foldl')
 import Data.Maybe(listToMaybe, fromMaybe, maybe, fromJust) -- blech
-import Data.Coerce(coerce)
+import Data.Coerce(coerce, Coercible)
 import Debug.Trace(traceShow)
 import Safe.Foldable(maximumMay, minimumMay, minimumByMay)
 import Safe(lastMay)
@@ -48,12 +47,10 @@ backTrace :: (Ord a, Ord b) => F.Fold (a, b) (M.Map a [b])
 backTrace = F.Fold r M.empty (fmap S.toList) where
     r m (x, y) = M.insertWith S.union x (S.singleton y) m
 
-type PopType x a = x -> Maybe (a, x)
-
 class ZeroNodes zn where
     type Elem zn
     push :: Elem zn -> zn -> zn
-    pop :: PopType zn (Elem zn) 
+    pop :: zn -> Maybe (Elem zn, zn) 
 
 data LexicalPriority a = LexicalPriority (S.Set a) 
     deriving (Show)
@@ -68,7 +65,6 @@ instance (Ord a) => ZeroNodes (LexicalPriority a) where
         where x = S.lookupMin s
               f x = LexicalPriority $ S.delete x s
 
-
 data HahnState zn = HahnState {
     _inDeg :: M.Map (Elem zn) Int,
     _zeroN :: zn
@@ -78,35 +74,32 @@ deriving instance (Show zn, Show (Elem zn)) => Show (HahnState zn)
 
 makeLenses ''HahnState
 
--- It would be nice to turn liftPopType into a lens, but I don't think it's possible
-liftPopType :: forall s a x . Lens' s a -> (PopType a x) -> (PopType s x) 
-liftPopType lens popA s = mxs where
-    mxa :: Maybe (x, a)
-    mxa = popA (s ^. lens)
-    mxs :: Maybe (x, s)
-    mxs = (Le._Just . Le._2) %~ (flip (lens .~) s) $ mxa
+-- There's got to be better way to do this
+liftPop :: forall s zn x . (ZeroNodes zn, x ~ Elem zn) => Lens' s zn -> StateT s Maybe x 
+liftPop lens = StateT $ mxs where
+    mxzn :: s -> Maybe (x, zn)
+    mxzn s = pop (s ^. lens)
+    mxs :: s -> Maybe (x, s)
+    mxs s = (Le._Just . Le._2) %~ (flip (lens .~) s) $ mxzn s
 
-nextNodeRaw :: (Ord (Elem zn), ZeroNodes zn) => StateT (HahnState zn) Maybe (Elem zn)
-nextNodeRaw = StateT $ liftPopType zeroN pop
-
-nextNode :: forall zn . (Show zn, Show (Elem zn), Ord (Elem zn), ZeroNodes zn) => 
-        (M.Map (Elem zn) [(Elem zn)]) -> StateT (HahnState zn) Maybe (Elem zn)
+-- Achievement unlocked: figured out why people write "a ~ Elem zn"
+nextNode :: forall zn a. (Ord a, ZeroNodes zn, a ~ Elem zn) => 
+        (M.Map a [a]) -> StateT (HahnState zn) Maybe a
 nextNode backTrace = do
-    x <- nextNodeRaw
-    let nodes = fromMaybe [] $ M.lookup x backTrace
-    x <$ traverse countDown nodes 
+    result <- liftPop zeroN
+    let nodes = fromMaybe [] $ M.lookup result backTrace
+    result <$ traverse countDown nodes 
     where countDown :: (Elem zn) -> StateT (HahnState zn) Maybe ()
           countDown n = (inDeg . U.atD n 0) <%= (subtract 1) >>= (updateZeroNodes n)
           updateZeroNodes n 0 = zeroN %= (push n)
           updateZeroNodes _ _ = pure ()
 
--- Achievement unlocked: figured out why people write "a ~ Elem zn"
-hahnAlgorithm :: forall zn t a . (Show zn, Show a, ZeroNodes zn, Foldable t, Ord a, a ~ Elem zn) 
+hahnAlgorithm :: forall zn t a . (ZeroNodes zn, Foldable t, Ord a, a ~ Elem zn) 
     => ([a] -> zn) -> t (a, a) -> ([a], zn)
-hahnAlgorithm construct edges = over Le._2 (view zeroN) $ fromMaybe ([], start) xxx  where
+hahnAlgorithm construct edges = over Le._2 (view zeroN) $ fromMaybe ([], start) finalState where
     (inD, bt) = F.fold ((,) <$> inDegree <*> backTrace) edges
     start = HahnState inD (construct $ zeroNodes inD) 
-    xxx = runStateT (many $ nextNode bt) start
+    finalState = runStateT (many $ nextNode bt) start
 
 edgeParser :: P.Parser (Char, Char)
 edgeParser = (,) <$> x <*> y where
@@ -126,12 +119,13 @@ day7atest = hahnAlgorithm constructLP <$$> day7Test
 
 data BStrategy a = BStrategy {
     _current :: Int,
-    _maxWorkers :: Int,
     _working :: [(Int, a)],
     _waiting :: LexicalPriority a
 } deriving (Show) 
 
 makeLenses 'BStrategy
+
+newtype BTestStrategy a = BTest (BStrategy a) deriving (Show)
 
 bCost z = 61 + on (-) fromEnum z 'A'
 bCostTest z = 1 + on (-) fromEnum z 'A'
@@ -139,18 +133,11 @@ bCostTest z = 1 + on (-) fromEnum z 'A'
 constructBS :: [Char] -> BStrategy Char
 constructBS initial = BStrategy {
     _current = 0,
-    _maxWorkers = 5,
     _working = [],
     _waiting = constructLP initial
 }
 
 type BStateT a v = StateT (BStrategy a) Maybe v
-
-joinMaybe :: (Monad m, Alternative m) => m (Maybe a) -> m a
-joinMaybe = ((maybe empty pure) =<<)
-
-lastAlternative :: (Monad m, Alternative m) => m a -> m a
-lastAlternative = joinMaybe . fmap lastMay . many
 
 try :: (Alternative m, MonadPlus m) => a -> StateT s m a -> StateT s m a 
 try v s = do
@@ -159,52 +146,56 @@ try v s = do
 
 assignWorkerReal :: forall a. (Ord a) => (a -> Int) -> BStateT a ()
 assignWorkerReal cost = do
-    next <- StateT $ liftPopType waiting pop
+    next <- liftPop waiting
     c <- use current
     working %= (:) (c + cost next, next)
 
-workersAvailable :: BStateT a Bool
-workersAvailable = (<=) <$> (length <$> (use working)) <*> (use maxWorkers)  
-
-assignWorker' :: forall a. (Ord a) => (a -> Int) -> BStateT a ()
-assignWorker' cost = (<$ (guard =<< workersAvailable)) =<< (assignWorkerReal cost)
-
-assignWorkers :: forall a. (Ord a, Show a, Show (BStrategy a)) => (a -> Int) -> BStateT a ()
-assignWorkers cost = do
-    let x = try [] (many $ assignWorker' cost)
-    xxx <- get
-    traceShow ("XX" ++ (show xxx)) $ (() <$ x)
+assignWorker' :: forall a. (Ord a) => (a -> Int) -> Int -> BStateT a ()
+assignWorker' cost maxWorkers = (<$ (guard =<< workersAvailable)) =<< (assignWorkerReal cost)
+    where workersAvailable = (<=) <$> (length <$> (use working)) <*> pure maxWorkers  
+ 
+assignWorkers :: forall a. (Ord a) => (a -> Int) -> Int -> BStateT a ()
+assignWorkers cost maxWorkers = () <$ try [] (many $ assignWorker' cost maxWorkers)
 
 nextTime :: BStateT a Int
 nextTime = lift =<< nextOrCurrent
     where next = minimumMay <$> fst <$$> (use working)
           nextOrCurrent = next <|> (Just <$> (use current))
 
-bPop :: forall a. (Show a, Ord a) => (a -> Int) -> BStateT a a
-bPop cost = do
-    xxx <- get
-    traceShow xxx $ assignWorkers cost
+bPop :: forall a. (Ord a) => BStateT a a
+bPop = do
     c <- nextTime
     current .= c
     (_, result) <- lift =<< minimumByMay (on compare fst) . filter ((== c) . fst) <$> (use working)
     working %= filter ((/= result) . snd)
-    assignWorkers cost 
-    xyz <- get
-    traceShow (result, xyz) $ pure result
+    pure result
+
+class AssignmentStrategy b where
+    assign :: Proxy b -> BStateT Char ()
+
+instance AssignmentStrategy (BStrategy Char) where
+    assign = const $ assignWorkers bCost 5
+
+instance AssignmentStrategy (BTestStrategy Char) where
+    assign = const $ assignWorkers bCostTest 2
+
+pushB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => Char -> b -> b
+pushB x = coerce . fromJust . (execStateT (assign (Proxy :: Proxy b))) . (waiting %~ push x). coerce
+
+popB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => b -> Maybe (Char, b)
+popB = coerce <$> runStateT $ (assign (Proxy :: Proxy b) *> bPop)
 
 instance ZeroNodes (BStrategy Char) where
     type Elem (BStrategy Char) = Char
-    push x = (waiting %~ push x) 
-    pop = runStateT $ bPop bCost
-
-newtype BTestStrategy a = BTest (BStrategy a) deriving (Show)
+    push = pushB
+    pop = popB
 
 instance ZeroNodes (BTestStrategy Char) where
     type Elem (BTestStrategy Char) = Char
-    push x = coerce . (waiting %~ push x) . coerce
-    pop = coerce <$> runStateT $ bPop bCostTest
-
+    push = pushB
+    pop = popB
+    
 day7b = hahnAlgorithm constructBS <$$> day7Input
-day7btest = hahnAlgorithm (BTest . (maxWorkers .~ 2). constructBS) <$$> day7Test
+day7btest = hahnAlgorithm (BTest . constructBS) <$$> day7Test
 
-initialTestState = BStrategy {_current = 0, _maxWorkers = 2, _working = [], _waiting = constructLP "AF"}
+xxx = BStrategy {_current = 0, _working = [], _waiting = constructLP "C"}

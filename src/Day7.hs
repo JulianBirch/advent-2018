@@ -15,24 +15,18 @@ import qualified Utility as U
 import qualified Parsing as P
 
 import Control.Lens.Operators
-import Control.Lens(Lens', lens, makeLenses, view, over, use)
-import Control.Monad.State.Strict(MonadState, StateT(..), get, execStateT, evalStateT, runStateT, put)
-import Control.Monad.Reader(MonadReader)
+import Control.Lens(Lens', makeLenses, view, over, use)
+import Control.Monad.State.Strict(StateT(..), get, execStateT, runStateT, put)
 import Control.Monad.Trans.Class(lift)
-import Control.Applicative(empty, (<|>), many, Alternative)
+import Control.Applicative((<|>), many, Alternative)
 import Data.Proxy(Proxy(..))
-import Data.List(foldl')
-import Data.Maybe(listToMaybe, fromMaybe, maybe, fromJust) -- blech
+import Data.Maybe(fromMaybe, fromJust) -- blech
 import Data.Coerce(coerce, Coercible)
-import Debug.Trace(traceShow)
-import Safe.Foldable(maximumMay, minimumMay, minimumByMay)
-import Safe(lastMay)
+import Safe.Foldable(minimumMay, minimumByMay)
 import Data.Function(on)
 import Control.Monad(guard, MonadPlus)
 
 import qualified Control.Lens as Le 
-import qualified Control.Lens.Traversal as LT 
-import qualified Control.Lens.Type as LTy 
 import Utility((<$$>))
 
 -- from -> to
@@ -75,14 +69,14 @@ deriving instance (Show zn, Show (Elem zn)) => Show (HahnState zn)
 makeLenses ''HahnState
 
 -- There's got to be better way to do this
-liftPop :: forall s zn x . (ZeroNodes zn, x ~ Elem zn) => Lens' s zn -> StateT s Maybe x 
-liftPop lens = StateT $ mxs where
-    mxzn :: s -> Maybe (x, zn)
-    mxzn s = pop (s ^. lens)
-    mxs :: s -> Maybe (x, s)
-    mxs s = (Le._Just . Le._2) %~ (flip (lens .~) s) $ mxzn s
-
 -- Achievement unlocked: figured out why people write "a ~ Elem zn"
+liftPop :: forall s zn a . (ZeroNodes zn, a ~ Elem zn) => Lens' s zn -> StateT s Maybe a 
+liftPop lens = StateT $ mas where
+    mazn :: s -> Maybe (a, zn)
+    mazn s = pop (s ^. lens)
+    mas :: s -> Maybe (a, s)
+    mas s = (Le._Just . Le._2) %~ (flip (lens .~) s) $ mazn s
+
 nextNode :: forall zn a. (Ord a, ZeroNodes zn, a ~ Elem zn) => 
         (M.Map a [a]) -> StateT (HahnState zn) Maybe a
 nextNode backTrace = do
@@ -114,8 +108,11 @@ day7Input = P.parseAdventFile (P.lineParser edgeParser) 7
 day7Test :: P.ParseResult IO [(Char, Char)]
 day7Test = P.parseAdventFile' (P.lineParser edgeParser) (P.adventFile' "7test")
 
-day7a = hahnAlgorithm constructLP <$$> day7Input
-day7atest = hahnAlgorithm constructLP <$$> day7Test
+day7a :: P.ParseResult IO String
+day7a = (fst . hahnAlgorithm constructLP) <$$> day7Input
+
+day7atest :: P.ParseResult IO String
+day7atest = (fst . hahnAlgorithm constructLP) <$$> day7Test
 
 data BStrategy a = BStrategy {
     _current :: Int,
@@ -126,9 +123,6 @@ data BStrategy a = BStrategy {
 makeLenses 'BStrategy
 
 newtype BTestStrategy a = BTest (BStrategy a) deriving (Show)
-
-bCost z = 61 + on (-) fromEnum z 'A'
-bCostTest z = 1 + on (-) fromEnum z 'A'
 
 constructBS :: [Char] -> BStrategy Char
 constructBS initial = BStrategy {
@@ -175,12 +169,14 @@ class AssignmentStrategy b where
 
 instance AssignmentStrategy (BStrategy Char) where
     assign = const $ assignWorkers bCost 5
+        where bCost z = 61 + on (-) fromEnum z 'A'
 
 instance AssignmentStrategy (BTestStrategy Char) where
     assign = const $ assignWorkers bCostTest 2
+        where bCostTest z = 1 + on (-) fromEnum z 'A'
 
 pushB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => Char -> b -> b
-pushB x = coerce . fromJust . (execStateT (assign (Proxy :: Proxy b))) . (waiting %~ push x). coerce
+pushB x = coerce . fromJust . (execStateT (assign (Proxy :: Proxy b))) . (waiting %~ push x) . coerce
 
 popB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => b -> Maybe (Char, b)
 popB = coerce <$> runStateT $ (assign (Proxy :: Proxy b) *> bPop)
@@ -195,7 +191,9 @@ instance ZeroNodes (BTestStrategy Char) where
     push = pushB
     pop = popB
     
-day7b = hahnAlgorithm constructBS <$$> day7Input
-day7btest = hahnAlgorithm (BTest . constructBS) <$$> day7Test
+day7b :: P.ParseResult IO (BStrategy Char)
+day7b = (snd . hahnAlgorithm constructBS) <$$> day7Input
 
-xxx = BStrategy {_current = 0, _working = [], _waiting = constructLP "C"}
+day7btest :: P.ParseResult IO (BTestStrategy Char)
+day7btest = (snd . hahnAlgorithm (BTest . constructBS)) <$$> day7Test
+

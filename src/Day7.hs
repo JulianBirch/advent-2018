@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, RankNTypes, ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE StandaloneDeriving, DeriveFoldable #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 {-# LANGUAGE UndecidableInstances #-}
@@ -16,15 +16,13 @@ import qualified Parsing as P
 
 import Control.Lens.Operators
 import Control.Lens(Lens', makeLenses, view, over, use)
-import Control.Monad.State.Strict(StateT(..), get, execStateT, runStateT, put)
-import Control.Monad.Trans.Class(lift)
-import Control.Applicative((<|>), many, Alternative)
+import Control.Monad.State.Strict(StateT(..), execStateT, runStateT)
+import Control.Applicative(many)
 import Data.Proxy(Proxy(..))
 import Data.Maybe(fromMaybe, fromJust) -- blech
 import Data.Coerce(coerce, Coercible)
-import Safe.Foldable(minimumMay, minimumByMay)
 import Data.Function(on)
-import Control.Monad(guard, MonadPlus)
+import Control.Monad(guard)
 
 import qualified Control.Lens as Le 
 import Utility((<$$>))
@@ -41,18 +39,18 @@ backTrace :: (Ord a, Ord b) => F.Fold (a, b) (M.Map a [b])
 backTrace = F.Fold r M.empty (fmap S.toList) where
     r m (x, y) = M.insertWith S.union x (S.singleton y) m
 
-class ZeroNodes zn where
+class StackLike zn where
     type Elem zn
     push :: Elem zn -> zn -> zn
     pop :: zn -> Maybe (Elem zn, zn) 
 
 data LexicalPriority a = LexicalPriority (S.Set a) 
-    deriving (Show)
+    deriving (Show, Foldable)
 
 constructLP :: (Foldable t, Ord a) => t a -> LexicalPriority a 
 constructLP = LexicalPriority . foldr S.insert S.empty
 
-instance (Ord a) => ZeroNodes (LexicalPriority a) where
+instance (Ord a) => StackLike (LexicalPriority a) where
     type Elem (LexicalPriority a) = a
     push x (LexicalPriority s) = LexicalPriority $ S.insert x s
     pop (LexicalPriority s) = ((,) <$> id <*> f) <$> x 
@@ -70,25 +68,25 @@ makeLenses ''HahnState
 
 -- There's got to be better way to do this
 -- Achievement unlocked: figured out why people write "a ~ Elem zn"
-liftPop :: forall s zn a . (ZeroNodes zn, a ~ Elem zn) => Lens' s zn -> StateT s Maybe a 
+liftPop :: forall s zn a . (StackLike zn, a ~ Elem zn) => Lens' s zn -> StateT s Maybe a 
 liftPop lens = StateT $ mas where
     mazn :: s -> Maybe (a, zn)
     mazn s = pop (s ^. lens)
     mas :: s -> Maybe (a, s)
     mas s = (Le._Just . Le._2) %~ (flip (lens .~) s) $ mazn s
 
-nextNode :: forall zn a. (Ord a, ZeroNodes zn, a ~ Elem zn) => 
+nextNode :: forall zn a. (Ord a, StackLike zn, a ~ Elem zn) => 
         (M.Map a [a]) -> StateT (HahnState zn) Maybe a
 nextNode backTrace = do
     result <- liftPop zeroN
     let nodes = fromMaybe [] $ M.lookup result backTrace
     result <$ traverse countDown nodes 
     where countDown :: (Elem zn) -> StateT (HahnState zn) Maybe ()
-          countDown n = (inDeg . U.atD n 0) <%= (subtract 1) >>= (updateZeroNodes n)
-          updateZeroNodes n 0 = zeroN %= (push n)
-          updateZeroNodes _ _ = pure ()
+          countDown n = (inDeg . U.atD n 0) <%= (subtract 1) >>= (updateStackLike n)
+          updateStackLike n 0 = zeroN %= (push n)
+          updateStackLike _ _ = pure ()
 
-hahnAlgorithm :: forall zn t a . (ZeroNodes zn, Foldable t, Ord a, a ~ Elem zn) 
+hahnAlgorithm :: forall zn t a . (StackLike zn, Foldable t, Ord a, a ~ Elem zn) 
     => ([a] -> zn) -> t (a, a) -> ([a], zn)
 hahnAlgorithm construct edges = over Le._2 (view zeroN) $ fromMaybe ([], start) finalState where
     (inD, bt) = F.fold ((,) <$> inDegree <*> backTrace) edges
@@ -114,86 +112,69 @@ day7a = (fst . hahnAlgorithm constructLP) <$$> day7Input
 day7atest :: P.ParseResult IO String
 day7atest = (fst . hahnAlgorithm constructLP) <$$> day7Test
 
-data BStrategy a = BStrategy {
-    _current :: Int,
-    _working :: [(Int, a)],
+-- Can't figure out a good way to parameterize the cost function
+data BStrategy t a = BStrategy {
+    _current :: t,
+    _working :: LexicalPriority (t, a),
     _waiting :: LexicalPriority a
 } deriving (Show) 
 
 makeLenses 'BStrategy
 
-newtype BTestStrategy a = BTest (BStrategy a) deriving (Show)
+newtype BTestStrategy = BTest (BStrategy Int Char) deriving (Show)
 
-constructBS :: [Char] -> BStrategy Char
+constructBS :: [Char] -> BStrategy Int Char
 constructBS initial = BStrategy {
     _current = 0,
-    _working = [],
+    _working = constructLP [],
     _waiting = constructLP initial
 }
 
-type BStateT a v = StateT (BStrategy a) Maybe v
+type BStateT a t v = StateT (BStrategy t a) Maybe v
 
-try :: (Alternative m, MonadPlus m) => a -> StateT s m a -> StateT s m a 
-try v s = do
-    originalState <- get
-    s <|> (put originalState *> pure v)
-
-assignWorkerReal :: forall a. (Ord a) => (a -> Int) -> BStateT a ()
-assignWorkerReal cost = do
-    next <- liftPop waiting
-    c <- use current
-    working %= (:) (c + cost next, next)
-
-assignWorker' :: forall a. (Ord a) => (a -> Int) -> Int -> BStateT a ()
-assignWorker' cost maxWorkers = (<$ (guard =<< workersAvailable)) =<< (assignWorkerReal cost)
-    where workersAvailable = (<=) <$> (length <$> (use working)) <*> pure maxWorkers  
- 
-assignWorkers :: forall a. (Ord a) => (a -> Int) -> Int -> BStateT a ()
-assignWorkers cost maxWorkers = () <$ try [] (many $ assignWorker' cost maxWorkers)
-
-nextTime :: BStateT a Int
-nextTime = lift =<< nextOrCurrent
-    where next = minimumMay <$> fst <$$> (use working)
-          nextOrCurrent = next <|> (Just <$> (use current))
-
-bPop :: forall a. (Ord a) => BStateT a a
-bPop = do
-    c <- nextTime
-    current .= c
-    (_, result) <- lift =<< minimumByMay (on compare fst) . filter ((== c) . fst) <$> (use working)
-    working %= filter ((/= result) . snd)
-    pure result
-
+assignWorkers :: forall a t . (Ord a, Ord t, Num t) => (a -> t) -> Int -> BStateT a t ()
+assignWorkers cost maxWorkers = () <$ (many assignWorkerLimited)
+    where assignWorkerLimited = (<$ (guard =<< workersAvailable)) =<< assignWorkerReal
+          workersAvailable = (<=) <$> (length <$> (use working)) <*> pure maxWorkers
+          assignWorkerReal = do
+                next <- liftPop waiting
+                c <- use current
+                working %= push (c + cost next, next)
+        
 class AssignmentStrategy b where
-    assign :: Proxy b -> BStateT Char ()
+    assign :: Proxy b -> BStateT Char Int ()
 
-instance AssignmentStrategy (BStrategy Char) where
+instance AssignmentStrategy (BStrategy Int Char) where
     assign = const $ assignWorkers bCost 5
         where bCost z = 61 + on (-) fromEnum z 'A'
 
-instance AssignmentStrategy (BTestStrategy Char) where
+instance AssignmentStrategy BTestStrategy where
     assign = const $ assignWorkers bCostTest 2
         where bCostTest z = 1 + on (-) fromEnum z 'A'
 
-pushB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => Char -> b -> b
+pushB :: forall b . (Coercible (BStrategy Int Char) b, AssignmentStrategy b) => Char -> b -> b
 pushB x = coerce . fromJust . (execStateT (assign (Proxy :: Proxy b))) . (waiting %~ push x) . coerce
 
-popB :: forall b . (Coercible (BStrategy Char) b, AssignmentStrategy b) => b -> Maybe (Char, b)
-popB = coerce <$> runStateT $ (assign (Proxy :: Proxy b) *> bPop)
+popB :: forall b . (Coercible (BStrategy Int Char) b, AssignmentStrategy b) => b -> Maybe (Char, b)
+popB = coerce <$> runStateT $ (assign (Proxy :: Proxy b) *> bPop) 
+    where bPop = do
+            (c, result) <- liftPop working
+            current .= c
+            pure result
 
-instance ZeroNodes (BStrategy Char) where
-    type Elem (BStrategy Char) = Char
+-- Not sure I know a good way to avoid this duplication
+instance StackLike (BStrategy Int Char) where
+    type Elem (BStrategy Int Char) = Char
     push = pushB
     pop = popB
 
-instance ZeroNodes (BTestStrategy Char) where
-    type Elem (BTestStrategy Char) = Char
+instance StackLike (BTestStrategy) where
+    type Elem BTestStrategy = Char
     push = pushB
     pop = popB
     
-day7b :: P.ParseResult IO (BStrategy Char)
-day7b = (snd . hahnAlgorithm constructBS) <$$> day7Input
+day7b :: P.ParseResult IO Int 
+day7b = (view current . snd . hahnAlgorithm constructBS) <$$> day7Input
 
-day7btest :: P.ParseResult IO (BTestStrategy Char)
+day7btest :: P.ParseResult IO BTestStrategy
 day7btest = (snd . hahnAlgorithm (BTest . constructBS)) <$$> day7Test
-

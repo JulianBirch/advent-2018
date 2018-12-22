@@ -8,10 +8,12 @@ module Day8 where
 import Data.Functor.Foldable(cata, Fix(..))
 import Data.Functor.Compose(Compose(..))
 import Data.Functor.Classes(Show1)
+import Data.Maybe(fromMaybe)
 import Control.Applicative((<|>), Alternative)
 import Utility((<$$>))
 import Debug.Trace(traceShow)
 import Text.Show.Deriving(deriveShow, deriveShow1)
+import Safe(atMay)
 
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char.Lexer as Le
@@ -49,4 +51,15 @@ day8Input = P.parseAdventFile (nodeParser C.newline) 8
 day8a = cata f <$$> day8Input where
     f n = sum (metaData n) + sum (subNodes n)
 
-day8TestData = MP.parseTest (nodeParser (pure 'x')) "2 3 0 3 10 11 12 1 1 0 1 99 2 1 1 2"
+day8bReduce :: Node Integer -> Integer
+day8bReduce n | 0 == length (subNodes n) = sum (metaData n)
+              | otherwise = sum $ lookup . fromIntegral . (subtract 1) <$> filter (/= 0) (metaData n)
+                    where lookup = (fromMaybe 0) . (atMay (subNodes n))
+                          
+day8b = cata day8bReduce <$$> day8Input
+
+(!.!) :: (Show a) => [a] -> Int -> a
+list !.! n | n < length list = list !! n
+           | otherwise = error ("Failed to lookup " ++ (show n) ++ " in " ++ (show list))
+
+day8TestData = MP.parse (nodeParser (pure 'x')) "" "2 3 0 3 10 11 12 1 1 0 1 99 2 1 1 2"

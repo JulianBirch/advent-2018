@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-missing-signatures -Wno-unused-matches #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -6,12 +5,8 @@
 module Day8 where
 
 import Data.Functor.Foldable(cata, Fix(..))
-import Data.Functor.Compose(Compose(..))
-import Data.Functor.Classes(Show1)
 import Data.Maybe(fromMaybe)
-import Control.Applicative((<|>), Alternative)
 import Utility((<$$>))
-import Debug.Trace(traceShow)
 import Text.Show.Deriving(deriveShow, deriveShow1)
 import Safe(atMay)
 
@@ -19,7 +14,6 @@ import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char.Lexer as Le
 import qualified Text.Megaparsec.Char as C
 import qualified Parsing as P 
--- Taken from https://stackoverflow.com/questions/53549105/exhibiting-the-relationship-between-hylo-and-hylom/53550252#53550252
 
 data Node s = Node {
     subNodes :: [s],
@@ -32,34 +26,28 @@ deriveShow1 ''Node
 space :: P.Parser Char
 space = MP.single ' '
 
-countSepBy :: (Alternative m, Monad m) => Int -> m a -> m b -> m [a]
-countSepBy n p sep | n > 0 = (:) <$> p <*> MP.count (n-1) (sep *> p) 
-countSepBy n p sep | otherwise = pure []
-
 nodeParser :: P.Parser Char -> P.Parser (Fix Node)
 nodeParser terminator = Fix <$> do  -- I have no idea why it doesn't work if I just put (Fix . Node) inside the do
     childNodeCount <- Le.decimal <* space
     metaNodeCount <- Le.decimal <* space
     childNodes <- MP.count childNodeCount (nodeParser space)
-    metaData <- countSepBy metaNodeCount Le.decimal space
+    metaData <- P.countSepBy metaNodeCount Le.decimal space
     _ <- terminator
     pure $ Node childNodes metaData 
 
 day8Input :: P.ParseResult IO (Fix Node)
 day8Input = P.parseAdventFile (nodeParser C.newline) 8
 
+day8a :: P.ParseResult IO Integer
 day8a = cata f <$$> day8Input where
     f n = sum (metaData n) + sum (subNodes n)
 
 day8bReduce :: Node Integer -> Integer
 day8bReduce n | 0 == length (subNodes n) = sum (metaData n)
-              | otherwise = sum $ lookup . fromIntegral . (subtract 1) <$> filter (/= 0) (metaData n)
+              | otherwise = sum $ lookup . fromIntegral . (subtract 1) <$> (metaData n)
                     where lookup = (fromMaybe 0) . (atMay (subNodes n))
                           
+day8b :: P.ParseResult IO Integer
 day8b = cata day8bReduce <$$> day8Input
 
-(!.!) :: (Show a) => [a] -> Int -> a
-list !.! n | n < length list = list !! n
-           | otherwise = error ("Failed to lookup " ++ (show n) ++ " in " ++ (show list))
 
-day8TestData = MP.parse (nodeParser (pure 'x')) "" "2 3 0 3 10 11 12 1 1 0 1 99 2 1 1 2"

@@ -6,12 +6,13 @@
 
 module Parsing(Parser, ParseResult, lineParser, 
     parseAdventFile, parseAdventFile',
-    adventFile, adventFile') where
+    adventFile, adventFile', countSepBy) where
 
 import qualified Text.Megaparsec as MP
 import qualified Text.Megaparsec.Char as C
 import Data.Void(Void)
 import Data.Functor.Identity(Identity)
+import Control.Applicative(Alternative)
 
 type Parser = MP.ParsecT Void String Identity -- No custom errors, String parser, using IO
 type ParseResult m a = m (Either (MP.ParseErrorBundle String Void) a)
@@ -34,3 +35,7 @@ parseAdventFile' p f = MP.runParser p f <$> readFile f where
 
 parseAdventFile :: MP.Parsec e String a -> Int -> IO (Either (MP.ParseErrorBundle String e) a)
 parseAdventFile p f = parseAdventFile' p (adventFile f)
+
+countSepBy :: (Alternative m, Monad m) => Int -> m a -> m b -> m [a]
+countSepBy n p sep | n > 0 = (:) <$> p <*> MP.count (n-1) (sep *> p) 
+                   | otherwise = pure []

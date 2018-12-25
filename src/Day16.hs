@@ -1,18 +1,17 @@
-{-# OPTIONS_GHC -Wno-unused-imports -Wno-missing-signatures -Wno-unused-matches -Wno-dodgy-imports -Wno-type-defaults #-} 
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, RankNTypes, ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Day16 where
 
-import Debug.Trace(traceShow)
-import Control.Monad.State.Strict(State(..), execState, runStateT)
+import Control.Monad.State.Strict(State, execState)
 import Control.Lens.Operators
-import Control.Lens(preuse, reuse, use, selfIndex, makeLenses, at, ix)
+import Control.Lens(preuse, ix)
+import Data.Bits((.&.), (.|.))
+import Utility((<$$>))
+
 import Data.Maybe(fromMaybe)
 import Data.Bool(bool)
-import Data.Bits((.&.), (.|.))
-import Utility((<$$>), atD)
 import Data.Function(on)
 import Data.List(unfoldr)
 import Control.Monad(guard)
@@ -83,15 +82,16 @@ repack _ = error "Repack failed"
 instructionParser :: P.Parser (Instruction Int)
 instructionParser = MP.label "Instruction" $ (Instruction . repack) <$> P.countSepBy 4 MPCL.decimal MPC.space
 
-parseMachineState = MP.between (MP.single '[') (MP.single ']') (P.countSepBy 4 MPCL.decimal (MP.chunk ", "))
+machineStateParser :: P.Parser [Int]
+machineStateParser = MP.between (MP.single '[') (MP.single ']') (P.countSepBy 4 MPCL.decimal (MP.chunk ", "))
 
 scenarioParser :: P.Parser Scenario
 scenarioParser = do
-    b <- MP.label "Before" $ MP.chunk "Before: " *> parseMachineState
+    b <- MP.label "Before" $ MP.chunk "Before: " *> machineStateParser
     _ <- MPC.newline
     i <- instructionParser
     _ <- MPC.newline
-    a <- MP.label "After" $ MP.chunk "After:  " *> parseMachineState
+    a <- MP.label "After" $ MP.chunk "After:  " *> machineStateParser
     _ <- MP.count 2 MPC.newline
     pure $ Scenario b i a
     where 
@@ -108,6 +108,7 @@ day16FileParser = do
     i <- P.lineParser instructionParser
     pure $ Day16File s i
 
+day16Input :: P.ParseResult IO Day16File
 day16Input = P.parseAdventFile day16FileParser 16
 
 verifyScenario :: Scenario -> OpCode -> Bool
@@ -117,11 +118,13 @@ verifyScenario s opCode = on (==) ($ s) after (execState state . before)  where
 allEnum :: (Bounded a, Enum a) => [a]
 allEnum = enumFrom minBound
 
+getOpCodes :: Scenario -> S.Set OpCode
+getOpCodes s = S.fromList $ filter (verifyScenario s) allEnum
+
+day16a :: P.ParseResult IO Int
 day16a = (length . filter ((>= 3) . length . getOpCodes) . scenarios) <$$> day16Input
 
-testScenario = MP.runParser scenarioParser "" "Before: [3, 2, 1, 1]\n9 2 1 2\nAfter:  [3, 2, 2, 1]\n\n"
-
-getOpCodes s = S.fromList $ filter (verifyScenario s) allEnum
+-- testScenario = MP.runParser scenarioParser "" "Before: [3, 2, 1, 1]\n9 2 1 2\nAfter:  [3, 2, 2, 1]\n\n"
 
 only :: S.Set c -> Either c (S.Set c)
 only set | 1 == length set = Left $ S.findMin set
@@ -147,5 +150,5 @@ run f = execState (traverse exec correctInstructions) [0,0,0,0]
     where mapping = (deduce . possibilitiesFromFile) f
           correctInstructions = (mapping M.!) <$$> (instructions f)
 
+day16b :: P.ParseResult IO Int
 day16b = (head . run) <$$> day16Input
-

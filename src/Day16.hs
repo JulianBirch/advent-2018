@@ -29,7 +29,8 @@ type Machine = State [Int]
 data Input = Register | Value
 
 data OpCode = Addr | Addi | Mulr | Muli | Banr | Bani | Borr | Bori
-    | Setr | Seti | Gtir | Gtri | Gtrr | Eqir | Eqri | Eqrr deriving (Bounded, Enum, Show)
+    | Setr | Seti | Gtir | Gtri | Gtrr | Eqir | Eqri | Eqrr 
+    deriving (Bounded, Enum, Show, Ord, Eq)
 
 getValue :: Input -> Int -> Machine Int
 getValue Value n = pure n
@@ -122,8 +123,29 @@ testScenario = MP.runParser scenarioParser "" "Before: [3, 2, 1, 1]\n9 2 1 2\nAf
 
 getOpCodes s = S.fromList $ filter (verifyScenario s) allEnum
 
+only :: S.Set c -> Either c (S.Set c)
+only set | 1 == length set = Left $ S.findMin set
+         | otherwise = Right $ set
 
-{-}
-possibleOpCodes :: Scenario -> [OpCode]
-possibleOpCodes = 
--}
+deduceStep :: (Ord a, Ord b) => M.Map a (S.Set b) -> Maybe (M.Map a b, M.Map a (S.Set b))
+deduceStep input = (deduced, newInput) <$ guard (not $ M.null deduced) where
+    (deduced, newInput') = M.mapEither only input
+    valuesToRemove = S.fromList $ M.elems deduced
+    newInput = (S.\\ valuesToRemove) <$> newInput'
+
+deduce :: (Ord a, Ord b) => M.Map a (S.Set b) -> M.Map a b
+deduce = M.unions . unfoldr deduceStep
+
+opCodeFromScenario :: Scenario -> Int
+opCodeFromScenario (Scenario {instruction = (Instruction (i,_,_,_))}) = i
+
+possibilitiesFromFile :: Day16File -> M.Map Int (S.Set OpCode)
+possibilitiesFromFile f = M.unions $ (M.singleton <$> opCodeFromScenario <*> getOpCodes) <$> (scenarios f)
+
+run :: Day16File -> [Int]
+run f = execState (traverse exec correctInstructions) [0,0,0,0]
+    where mapping = (deduce . possibilitiesFromFile) f
+          correctInstructions = (mapping M.!) <$$> (instructions f)
+
+day16b = (head . run) <$$> day16Input
+

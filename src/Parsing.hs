@@ -30,10 +30,11 @@ adventFile' s = "C:\\Users\\me\\advent2018\\day" ++ s ++ ".txt"
 adventFile' s = "/mnt/c/Users/me/advent2018/day" ++ s ++ ".txt"
 #endif
 
-parseAdventFile' :: MP.Parsec e String a -> String -> IO (Either (MP.ParseErrorBundle String e) a)
+-- Show a isn't needed by the function, but it sure as heck needed for every scenario I have for using it
+parseAdventFile' :: (Show a) => MP.Parsec e String a -> String -> IO (Either (MP.ParseErrorBundle String e) a)
 parseAdventFile' p f = MP.runParser p f <$> readFile f where
 
-parseAdventFile :: MP.Parsec e String a -> Int -> IO (Either (MP.ParseErrorBundle String e) a)
+parseAdventFile :: (Show a) => MP.Parsec e String a -> Int -> IO (Either (MP.ParseErrorBundle String e) a)
 parseAdventFile p f = parseAdventFile' p (adventFile f)
 
 countSepBy :: (Alternative m, Monad m) => Int -> m a -> m b -> m [a]

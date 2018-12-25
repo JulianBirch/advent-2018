@@ -11,6 +11,7 @@ leftToMaybe :: (Either a b) -> Maybe a
 leftToMaybe (Left a) = Just a
 leftToMaybe _ = Nothing
 
+infixr 8 <$$>
 (<$$>) :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
 (<$$>) = fmap . fmap
 
@@ -29,4 +30,7 @@ atD k d = lens get set where
 atD2 :: (Ord k1, Ord k2) => k1 -> k2 -> v -> Lens' (M.Map k1 (M.Map k2 v)) v
 atD2 k1 k2 v = (atD k1 M.empty) . (atD k2 v)
 
-    
+-- Like !! but decent diagnostics when it fails
+(!.!) :: (Show a) => [a] -> Int -> a
+list !.! n | n < length list = list !! n
+           | otherwise = error ("Failed to lookup " ++ (show n) ++ " in " ++ (show list))

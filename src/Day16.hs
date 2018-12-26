@@ -6,7 +6,7 @@ module Day16(exec16, Instruction(..), OpCode(..), HasRegisters(..), instructionP
 
 import Control.Monad.State.Strict(MonadState, execState)
 import Control.Lens.Operators
-import Control.Lens(preuse, ix, Lens')
+import Control.Lens(preuse, ix, Lens', Traversal')
 import Data.Bits((.&.), (.|.))
 import Utility((<$$>), allEnum)
 
@@ -56,15 +56,18 @@ newtype Instruction a = Instruction (a,Int,Int,Int)
 
 class HasRegisters s where
   registers :: Lens' s [Int]
-
+  register :: Int -> Traversal' s Int
+  
+  register = (registers .) . ix
+  
 exec16 :: forall s m . (MonadState s m) => (HasRegisters s) => Instruction OpCode -> m ()
 exec16 (Instruction (opCode,a,b,c)) = do
     let (ia, ib, op) = interpretOpCode opCode
     val <- op <$> (getValue ia a) <*> (getValue ib b)
-    (registers . ix c) .= val
+    register c .= val
     where getValue :: Input -> Int -> m Int
           getValue Value n = pure n
-          getValue Register n = fromMaybe (0 :: Int) <$> preuse (registers . ix (fromIntegral n))
+          getValue Register n = fromMaybe 0 <$> preuse (register (fromIntegral n))
 
 data Scenario = Scenario {
     before :: [Int],
@@ -118,8 +121,7 @@ day16a = (length . filter ((>= 3) . length . getOpCodes) . scenarios) <$$> day16
 -- testScenario = MP.runParser scenarioParser "" "Before: [3, 2, 1, 1]\n9 2 1 2\nAfter:  [3, 2, 2, 1]\n\n"
 
 only :: S.Set c -> Either c (S.Set c)
-only set | 1 == length set = Left $ S.findMin set
-         | otherwise = Right $ set
+only set = bool (Left . S.findMin) Right (length set == 1) set
 
 deduceStep :: (Ord a, Ord b) => M.Map a (S.Set b) -> Maybe (M.Map a b, M.Map a (S.Set b))
 deduceStep input = (deduced, newInput) <$ guard (not $ M.null deduced) where

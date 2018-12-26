@@ -2,13 +2,13 @@
 {-# LANGUAGE StandaloneDeriving, DeriveFunctor #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Day16 where
+module Day16(exec16, Instruction(..), OpCode(..), HasRegisters(..), instructionParser) where
 
-import Control.Monad.State.Strict(State, execState)
+import Control.Monad.State.Strict(MonadState, execState)
 import Control.Lens.Operators
-import Control.Lens(preuse, ix)
+import Control.Lens(preuse, ix, Lens')
 import Data.Bits((.&.), (.|.))
-import Utility((<$$>))
+import Utility((<$$>), allEnum)
 
 import Data.Maybe(fromMaybe)
 import Data.Bool(bool)
@@ -23,20 +23,11 @@ import qualified Parsing as P
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-type Machine = State [Int]
-
 data Input = Register | Value
 
 data OpCode = Addr | Addi | Mulr | Muli | Banr | Bani | Borr | Bori
     | Setr | Seti | Gtir | Gtri | Gtrr | Eqir | Eqri | Eqrr 
     deriving (Bounded, Enum, Show, Ord, Eq)
-
-getValue :: Input -> Int -> Machine Int
-getValue Value n = pure n
-getValue Register n = fromMaybe 0 <$> preuse (ix n)
-
-setValue :: Int -> Int -> Machine ()
-setValue pos val = ix pos .= val
 
 to10 :: Bool -> Int
 to10 = bool 0 1
@@ -60,14 +51,20 @@ interpretOpCode Eqir = (Value, Register, (to10 .) . (==))
 interpretOpCode Eqri = (Register, Value, (to10 .) . (==))
 interpretOpCode Eqrr = (Register, Register, (to10 .) . (==)) 
      
-exec :: Instruction OpCode -> Machine ()
-exec (Instruction (opCode,a,b,c)) = do
-    let (ia, ib, op) = interpretOpCode opCode
-    x <- op <$> (getValue ia a) <*> (getValue ib b)
-    setValue c x
-
 newtype Instruction a = Instruction (a,Int,Int,Int)
     deriving (Functor, Show)
+
+class HasRegisters s where
+  registers :: Lens' s [Int]
+
+exec16 :: forall s m . (MonadState s m) => (HasRegisters s) => Instruction OpCode -> m ()
+exec16 (Instruction (opCode,a,b,c)) = do
+    let (ia, ib, op) = interpretOpCode opCode
+    val <- op <$> (getValue ia a) <*> (getValue ib b)
+    (registers . ix c) .= val
+    where getValue :: Input -> Int -> m Int
+          getValue Value n = pure n
+          getValue Register n = fromMaybe (0 :: Int) <$> preuse (registers . ix (fromIntegral n))
 
 data Scenario = Scenario {
     before :: [Int],
@@ -75,12 +72,10 @@ data Scenario = Scenario {
     after :: [Int]
 } deriving (Show)
 
-repack :: [a] -> (a,a,a,a)
-repack (a:b:c:d:_) = (a,b,c,d)
-repack _ = error "Repack failed"
-
-instructionParser :: P.Parser (Instruction Int)
-instructionParser = MP.label "Instruction" $ (Instruction . repack) <$> P.countSepBy 4 MPCL.decimal MPC.space
+instructionParser :: P.Parser a -> P.Parser (Instruction a)
+instructionParser p = MP.label "Instruction" $ repack <$> p <*> MP.count 3 (MPC.space *> MPCL.decimal)
+    where repack a [b,c,d] = Instruction (a,b,c,d)
+          repack _ _ = error "Repack failed"
 
 machineStateParser :: P.Parser [Int]
 machineStateParser = MP.between (MP.single '[') (MP.single ']') (P.countSepBy 4 MPCL.decimal (MP.chunk ", "))
@@ -89,12 +84,11 @@ scenarioParser :: P.Parser Scenario
 scenarioParser = do
     b <- MP.label "Before" $ MP.chunk "Before: " *> machineStateParser
     _ <- MPC.newline
-    i <- instructionParser
+    i <- instructionParser MPCL.decimal
     _ <- MPC.newline
     a <- MP.label "After" $ MP.chunk "After:  " *> machineStateParser
     _ <- MP.count 2 MPC.newline
     pure $ Scenario b i a
-    where 
 
 data Day16File = Day16File {
     scenarios :: [Scenario],
@@ -105,7 +99,7 @@ day16FileParser :: P.Parser Day16File
 day16FileParser = do
     s <- MP.many scenarioParser
     _ <- MP.many MPC.newline
-    i <- P.lineParser instructionParser
+    i <- P.lineParser $ instructionParser MPCL.decimal
     pure $ Day16File s i
 
 day16Input :: P.ParseResult IO Day16File
@@ -113,10 +107,7 @@ day16Input = P.parseAdventFile day16FileParser 16
 
 verifyScenario :: Scenario -> OpCode -> Bool
 verifyScenario s opCode = on (==) ($ s) after (execState state . before)  where
-    state = exec $ (const opCode) <$> instruction s
-
-allEnum :: (Bounded a, Enum a) => [a]
-allEnum = enumFrom minBound
+    state = exec16 $ (const opCode) <$> instruction s
 
 getOpCodes :: Scenario -> S.Set OpCode
 getOpCodes s = S.fromList $ filter (verifyScenario s) allEnum
@@ -145,8 +136,11 @@ opCodeFromScenario (Scenario {instruction = (Instruction (i,_,_,_))}) = i
 possibilitiesFromFile :: Day16File -> M.Map Int (S.Set OpCode)
 possibilitiesFromFile f = M.unions $ (M.singleton <$> opCodeFromScenario <*> getOpCodes) <$> (scenarios f)
 
+instance HasRegisters ([Int]) where
+    registers = id
+
 run :: Day16File -> [Int]
-run f = execState (traverse exec correctInstructions) [0,0,0,0]
+run f = execState (traverse exec16 correctInstructions) [0,0,0,0]
     where mapping = (deduce . possibilitiesFromFile) f
           correctInstructions = (mapping M.!) <$$> (instructions f)
 

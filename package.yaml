@@ -45,6 +45,7 @@ dependencies:
 - parser-combinators
 - safe
 - deriving-compat
+- data-has
 
 library:
   source-dirs: src

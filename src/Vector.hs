@@ -15,7 +15,7 @@ import Data.Monoid (mempty, mappend)
 data Vector2D u = Vector2D { 
     _x :: u, 
     _y :: u 
-} deriving stock (Show, Eq, Functor, Foldable, Traversable)
+} deriving stock (Show, Ord, Eq, Functor, Foldable, Traversable)
 
 makeLenses ''Vector2D
 

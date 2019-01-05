@@ -11,16 +11,15 @@ module Grid where
 
 import Prelude hiding ((+), (*))
 import qualified Prelude as P
-import Data.Semigroup (Semigroup, (<>))
-import Data.Monoid (mempty, mappend)
+import Data.Semigroup (Semigroup)
 import Data.Proxy (Proxy(Proxy))
 import Control.Lens (Iso, iso, Lens')
-import Control.Lens.TH (makeLenses)
 import Control.Lens.Operators ((^.), (%~))
 import Numeric.Algebra.Class hiding ((.*), (*.))
 import Numeric.Additive.Class
+import Vector
+import Algebra
 
-      
 newtype Square a = Square (Vector2D a) deriving stock (Show, Eq)
 
 deriving via (Vector2D a) instance (Additive a) => Additive (Square a) 
@@ -30,32 +29,51 @@ deriving via (Vector2D a) instance (Additive a, Num a) => Monoid (Square a)
 deriving via (Vector2D a) instance (Semiring a) => LeftModule' a (Square a) 
 deriving via (Vector2D a) instance (Semiring a) => RightModule' a (Square a)
 
-deriving via (Vector2D a) instance forall d . (Additive a) => Additive (SquareX d a) 
+deriving via (Vector2D a) instance (Ord a) => Ord (Square a)
+
+-- deriving via (Vector2D a) instance forall d . (Additive a) => Additive (Square d a) 
 
 -- Square is implicitly a module now
 
 data SquareDirection = SquareE | SquareS | SquareW | SquareN  
-    deriving (Enum, Bounded)
+    deriving (Enum, Bounded, Show, Eq, Ord)
 data PointyHexDirection = PointyE | PointySE | PointySW | PointyW | PointyNW | PointyNE
-    deriving (Enum, Bounded)
+    deriving (Enum, Bounded, Show, Eq, Ord)
 data FlatHexDirection = FlatSE | FlatSW | FlatS | FlatN | FlatNW | FlatNE
-    deriving (Enum, Bounded)
+    deriving (Enum, Bounded, Show, Eq, Ord)
 
 class (Enum a, Bounded a) => Direction a where
     angleOfFirstVectorInDegrees :: (Floating f) => Proxy a -> f
     numberOfDirections :: Proxy a -> Int
+    opposite :: a -> a
 
 instance Direction SquareDirection where
     angleOfFirstVectorInDegrees = const (0-45)
     numberOfDirections = const 4
+    opposite SquareE = SquareW
+    opposite SquareN = SquareS
+    opposite SquareW = SquareE
+    opposite SquareS = SquareN
 
 instance Direction PointyHexDirection where
     angleOfFirstVectorInDegrees = const (0-30)
     numberOfDirections = const 6
+    opposite PointyE = PointyW
+    opposite PointySE = PointyNW
+    opposite PointySW = PointyNE
+    opposite PointyW = PointyE
+    opposite PointyNE = PointySW
+    opposite PointyNW = PointySE
 
 instance Direction FlatHexDirection where
     angleOfFirstVectorInDegrees = const 0
     numberOfDirections = const 6
+    opposite FlatSE = FlatNW
+    opposite FlatSW = FlatNE
+    opposite FlatS = FlatN
+    opposite FlatNE = FlatSW
+    opposite FlatNW = FlatSE
+    opposite FlatN = FlatS
 
 -- ripped off astro 
 
@@ -105,6 +123,12 @@ newtype Offset d o a = Offset (Vector2D a) deriving (Show, Eq)
 
 class (Direction d, Monoid p) => Vector p d | p -> d where
     move :: d -> p -> p
+
+instance Vector (Square Int) SquareDirection where
+    move SquareN (Square (Vector2D x y)) = Square $ Vector2D x (y+1)
+    move SquareS (Square (Vector2D x y)) = Square $ Vector2D x (y-1)
+    move SquareE (Square (Vector2D x y)) = Square $ Vector2D (x+1) y
+    move SquareW (Square (Vector2D x y)) = Square $ Vector2D (x-1) y
 
 {-# INLINE axialHexCubeIso #-}
 axialHexCubeIso :: forall d a b . (Num b) => Iso (HexCube d a) (HexCube d b) (Axial d a) (Axial d b)
